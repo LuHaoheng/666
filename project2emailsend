@@ -1,0 +1,31 @@
+import smtplib
+from email.message import EmailMessage
+
+
+SENDER_EMAIL = "1457658620@qq.com"
+APP_PASSWORD = "hwlqxfvsbmmvfiac"
+RECIPIENT_EMAIL = "1551921411@qq.com"
+
+def send_email(subject, content):
+    """发送邮件（返回True=成功，False=失败）"""
+    try:
+        # 构建邮件内容
+        msg = EmailMessage()
+        msg["From"] = SENDER_EMAIL
+        msg["To"] = RECIPIENT_EMAIL
+        msg["Subject"] = subject
+        msg.set_content(content)
+
+        # 连接QQ邮箱SMTP服务器（SSL端口465）
+        with smtplib.SMTP_SSL("smtp.qq.com", 465) as smtp:
+            smtp.login(SENDER_EMAIL, APP_PASSWORD)
+            smtp.send_message(msg)
+        print(f"邮件发送成功：{subject}")
+        return True
+    except Exception as e:
+        print(f"邮件发送成功：{str(e)}")
+        return False
+
+# 测试邮件发送（运行后检查收件箱）
+if __name__ == "__main__":
+    send_email("土壤湿度监测测试", "这是一封来自树莓派的测试邮件！")
