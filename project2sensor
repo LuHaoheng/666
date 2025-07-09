@@ -1,0 +1,38 @@
+import RPi.GPIO as GPIO
+import time
+
+
+D0_PIN = 4
+
+def setup():
+    """初始化GPIO"""
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(D0_PIN, GPIO.IN)
+
+def read_moisture():
+    """读取土壤湿度状态（返回'dry'或'wet'）"""
+    try:
+        status = GPIO.input(D0_PIN)
+        return "dry" if status == GPIO.HIGH else "wet"  # 高电平=干燥，低电平=湿润
+    except Exception as e:
+        print(f"传感器读取错误：{e}")
+        return None
+
+def main():
+    setup()
+    print("传感器测试启动（按Ctrl+C退出）...")
+    try:
+        while True:
+            status = read_moisture()
+            if status:
+                print(f"当前状态：{status.upper()}")  # 输出大写便于观察
+            else:
+                print("传感器异常，请检查连接！")
+            time.sleep(1)  # 每秒检测一次
+    except KeyboardInterrupt:
+        print("\n程序终止")
+    finally:
+        GPIO.cleanup()  # 释放GPIO资源
+
+if __name__ == "__main__":
+    main()
