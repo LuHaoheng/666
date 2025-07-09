@@ -11,9 +11,9 @@ from datetime import datetime, time as dt_time, timedelta
 D0_PIN = 4  # GPIO4
 
 # QQ邮箱配置
-SENDER_EMAIL = "1457658620@qq.com"
+SENDER_EMAIL = "3129349981@qq.com"
 APP_PASSWORD = "hwlqxfvsbmmvfiac"
-RECIPIENT_EMAIL = "1551921411@qq.com"
+RECIPIENT_EMAIL = "3129349981@qq.com"
 
 # 检测时间配置（21:00, 21:10, 21:20, 21:30）
 TARGET_HOURS = 21
