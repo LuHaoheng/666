@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+import time
+import smtplib
+import RPi.GPIO as GPIO
+import re
+from email.message import EmailMessage
+from datetime import datetime, time as dt_time, timedelta
+
+
+# 传感器配置
+D0_PIN = 4  # GPIO4
+
+# QQ邮箱配置
+SENDER_EMAIL = "1457658620@qq.com"
+APP_PASSWORD = "hwlqxfvsbmmvfiac"
+RECIPIENT_EMAIL = "1551921411@qq.com"
+
+# 检测时间配置（21:00, 21:10, 21:20, 21:30）
+TARGET_HOURS = 21
+TARGET_MINUTES = [0, 10, 20, 30]  # 每小时内的检测分钟数（保持不变）
+
+# 传感器阈值（根据实际传感器调整，假设高电平=Dry，低电平=Wet）
+DRY_THRESHOLD = GPIO.HIGH  # 干燥状态对应的高电平值
+# ----------------------------------------------------------
+
+def setup_sensor():
+    """初始化传感器GPIO"""
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(D0_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # 启用下拉电阻防浮空
+
+def read_moisture_status():
+    """读取土壤状态（返回'dry'/'wet'或None）"""
+    try:
+        status = GPIO.input(D0_PIN)
+        return "dry" if status == DRY_THRESHOLD else "wet"
+    except Exception as e:
+        print(f"传感器读取错误：{e}")
+        return None
+
+def is_valid_email(email):
+    """邮箱格式验证（修复re模块引用问题）"""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+def send_notification(status):
+    """发送邮件通知并记录日志"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    subject = f"土壤湿度提醒 - {now}"
+    content = f"当前土壤状态：{status.upper()}\n请及时检查并浇水！"
+    
+    # 调试：打印邮件内容
+    print("\n===== 待发送邮件内容 =====")
+    print(f"主题：{subject}")
+    print(f"内容：{content}")
+    print("==========================\n")
+    
+    # 发送邮件（带重试机制）
+    success, error_msg = send_email_with_retry(subject, content)
+    
+    # 记录日志
+    log_entry = f"[{now}] 发送状态：{'成功' if success else '失败'} | 错误信息：{error_msg}\n"
+    with open("email_log.txt", "a", encoding="utf-8") as f:
+        f.write(log_entry)
+
+def send_email(subject, content):
+    """核心邮件发送函数（适配SSL端口465）"""
+    try:
+        # 验证邮箱格式（防止无效配置）
+        if not is_valid_email(SENDER_EMAIL):
+            raise ValueError(f"发件人邮箱格式无效：{SENDER_EMAIL}")
+        if not is_valid_email(RECIPIENT_EMAIL):
+            raise ValueError(f"收件人邮箱格式无效：{RECIPIENT_EMAIL}")
+
+        # 构建邮件对象（严格符合RFC标准）
+        msg = EmailMessage()
+        msg["From"] = SENDER_EMAIL
+        msg["To"] = RECIPIENT_EMAIL
+        msg["Subject"] = subject
+        msg.set_content(content)  # 纯文本内容
+
+        # 连接QQ邮箱SMTP服务器（SSL端口465）
+        print("尝试连接QQ邮箱SMTP服务器（smtp.qq.com:465）...")
+        with smtplib.SMTP_SSL("smtp.qq.com", 465, timeout=20) as smtp:
+            smtp.set_debuglevel(1)  # 显示SMTP协议交互细节
+            print("已连接服务器，尝试登录...")
+            smtp.login(SENDER_EMAIL, APP_PASSWORD)
+            print("登录成功，发送邮件...")
+            smtp.send_message(msg)
+            print("邮件发送成功！")
+        return True, None
+    
+    # 捕获并处理具体异常
+    except smtplib.SMTPAuthenticationError as e:
+        err_msg = f"认证失败：{str(e)}\n请检查：\n1. 授权码是否正确\n2. QQ邮箱是否开启SMTP服务（设置->账户->POP3/SMTP）"
+        print(f"{err_msg}")
+        return False, err_msg
+    except smtplib.SMTPConnectError as e:
+        err_msg = f"连接失败：{str(e)}\n请检查：\n1. 网络是否能访问smtp.qq.com:465\n2. 防火墙/代理是否拦截"
+        print(f" {err_msg}")
+        return False, err_msg
+    except ValueError as e:  # 邮箱格式错误
+        print(f"{str(e)}")
+        return False, str(e)
+    except Exception as e:
+        err_msg = f"邮件发送未知错误：{str(e)}"
+        print(f" {err_msg}")
+        return False, err_msg
+
+def send_email_with_retry(subject, content, max_retries=3, retry_delay=5):
+    """带重试机制的邮件发送函数"""
+    for attempt in range(max_retries):
+        success, error_msg = send_email(subject, content)
+        if success:
+            return True, None
+        print(f"第{attempt+1}次发送失败（剩余{max_retries-attempt}次），{retry_delay}秒后重试...")
+        time.sleep(retry_delay)
+    return False, f"重试{max_retries}次均失败：{error_msg}"
+
+def main():
+    """主程序：定时检测并发送通知"""
+    # 初始化硬件和校验配置
+    setup_sensor()
+    
+    # 校验邮箱格式（程序启动时检查）
+    if not is_valid_email(SENDER_EMAIL):
+        print(f"程序终止：发件人邮箱格式无效（{SENDER_EMAIL}）")
+        return
+    if not is_valid_email(RECIPIENT_EMAIL):
+        print(f"程序终止：收件人邮箱格式无效（{RECIPIENT_EMAIL}）")
+        return
+
+    print("土壤湿度监测启动（按Ctrl+C退出）...")
+    
+    while True:
+        now = datetime.now()
+        current_hour = now.hour
+        current_minute = now.minute
+
+        # 判断是否到达检测时间（21:00, 21:10, 21:20, 21:30）
+        if current_hour == TARGET_HOURS and current_minute in TARGET_MINUTES:
+            print(f"\n当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，开始检测...")
+            status = read_moisture_status()
+            
+            if status:
+                print(f"检测结果：土壤{status.upper()}，准备发送邮件...")
+                send_notification(status)
+            else:
+                print("传感器异常，跳过本次检测。")
+            
+            # 检测间隔至少1分钟（避免重复触发）
+            time.sleep(60)
+        
+        # 非检测时间保持低功耗等待
+        else:
+            # 计算距离下一个检测时间的等待时间（最多等待10分钟）
+            next_min = min([m for m in TARGET_MINUTES if m > current_minute], default=TARGET_MINUTES[0])
+            if current_hour == TARGET_HOURS and next_min < current_minute:
+                next_hour = TARGET_HOURS + 1
+            else:
+                next_hour = TARGET_HOURS
+            
+            next_time = datetime(now.year, now.month, now.day, next_hour, next_min)
+            wait_seconds = (next_time - now).total_seconds()
+            
+            if wait_seconds > 0:
+                hours, remainder = divmod(wait_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                print(f"下一次检测将在 {int(hours)}小时{int(minutes)}分钟{int(seconds)}秒后（{next_time.strftime('%Y-%m-%d %H:%M:%S')}）")
+                time.sleep(wait_seconds)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n程序已手动终止")
+    except Exception as e:
+        print(f"程序运行时发生严重错误：{e}")
+    finally:
+        # 确保GPIO资源清理（仅在程序结束时执行一次）
+        GPIO.cleanup()
+        print("GPIO资源已清理")
